@@ -10,7 +10,7 @@ fn main() {
     let org = Organism::new(
         10.0,
         1.0,
-        1000,
+        10000,
         dvec2(300.0, 300.0),
         BehaviourArchetypes::Hunter,
     );

@@ -56,6 +56,7 @@ impl Species {
             for j in 0..i {
                 let [a, b] = self.organisms.get_disjoint_mut([i, j]).unwrap();
                 a.add_vision(b);
+                b.add_vision(a);
             }
         }
         for organism in &mut self.organisms {
