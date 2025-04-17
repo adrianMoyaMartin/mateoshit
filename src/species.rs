@@ -1,5 +1,5 @@
 use glam::{DVec2, dvec2};
-use rand::{self, Rng};
+use rand::{self, Rng, rng};
 use raylib::{
     color::Color,
     ffi::{Rectangle, Vector2},
@@ -46,10 +46,10 @@ impl Species {
             }
         }
     }
-    pub fn update(&mut self) {
+    pub fn update(&mut self, ft: f64) {
         let n = self.organisms.len();
         for organism in &mut self.organisms {
-            organism.movement();
+            organism.movement(ft);
             organism.clear_vision();
         }
         for i in 0..n {
@@ -75,6 +75,7 @@ pub struct Organism {
     vision: i32,
     behaviour_type: BehaviourArchetypes,
     current_behaviour: CurrentBehaviour,
+    idle_dir: DVec2,
     pos: DVec2,
     visible_creatures: Vec<DVec2>,
 }
@@ -86,6 +87,8 @@ impl Organism {
         pos: DVec2,
         behaviour_type: BehaviourArchetypes,
     ) -> Self {
+        let rand: f64 = rng().random();
+        let rand2: f64 = rng().random();
         Self {
             energy: 100.0,
             metabolism,
@@ -94,28 +97,28 @@ impl Organism {
             pos,
             behaviour_type,
             current_behaviour: CurrentBehaviour::Idle,
+            idle_dir: dvec2(rand, rand2),
             visible_creatures: vec![],
         }
     }
-    fn movement(&mut self) {
+    fn movement(&mut self, ft: f64) {
         let mut rng = rand::rng();
         let movement: f64 = rng.random();
 
         match self.current_behaviour {
-            CurrentBehaviour::Active(flee_dir) => {
-                match self.behaviour_type {
-                    BehaviourArchetypes::Prey => self.pos -= flee_dir.normalize() * movement,
-                    BehaviourArchetypes::Hunter => self.pos += flee_dir.normalize() * 1.0,
-                };
+            CurrentBehaviour::Active(move_dir) => {
+                self.pos += move_dir * self.speed * movement * ft;
             }
             CurrentBehaviour::Idle => {
-                let r1: f64 = rng.random_range(-1.0..1.0);
-                let r2: f64 = rng.random_range(-1.0..1.0);
-                let mov = dvec2(r1, r2);
-
-                if mov.length_squared() > 0.0001 {
-                    self.pos += mov.normalize() * self.speed * (movement * 2.0);
+                if rng.random_bool(0.05) {
+                    let jitter = dvec2(rng.random_range(-0.5..=0.5), rng.random_range(-0.5..=0.5));
+                    let new_dir = self.idle_dir + jitter;
+                    if new_dir.length_squared() > 0.0001 {
+                        self.idle_dir = new_dir.normalize();
+                    }
                 }
+
+                self.pos += self.idle_dir * self.speed * ft * movement;
             }
         }
     }
@@ -144,7 +147,9 @@ impl Organism {
                 }
 
                 if flee_dir.length_squared() > 0.0001 {
-                    self.current_behaviour = CurrentBehaviour::Active(flee_dir.normalize());
+                    let mut angle = flee_dir.to_angle();
+                    angle += rng().random::<f64>() / 2.0;
+                    self.current_behaviour = CurrentBehaviour::Active(DVec2::from_angle(angle));
                 } else {
                     self.current_behaviour = CurrentBehaviour::Idle;
                 }
@@ -161,7 +166,7 @@ impl Organism {
                     let raw_dir = target - self.pos;
                     if raw_dir.length_squared() > 0.0001 {
                         let dir = raw_dir.normalize();
-                        self.current_behaviour = CurrentBehaviour::Active(dir);
+                        self.current_behaviour = CurrentBehaviour::Active(1.01 * dir);
                     } else {
                         self.current_behaviour = CurrentBehaviour::Idle;
                     }
