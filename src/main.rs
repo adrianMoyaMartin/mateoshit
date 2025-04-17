@@ -8,22 +8,19 @@ fn main() {
     rl.set_target_fps(60);
     let mut species = Species::new();
     let org = Organism::new(
-        10.0,
-        65.0,
+            20.0,
         150,
         dvec2(640.0, 440.0),
         BehaviourArchetypes::Hunter,
     );
     let org2 = Organism::new(
         10.0,
-        50.0,
         200,
         dvec2(100.0, 300.0),
         BehaviourArchetypes::Prey,
     );
     let org3 = Organism::new(
         10.0,
-        50.0,
         200,
         dvec2(600.0, 300.0),
         BehaviourArchetypes::Prey,

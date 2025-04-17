@@ -20,8 +20,8 @@ impl Species {
                 BehaviourArchetypes::Prey => {
                     d.draw_rectangle_pro(
                         Rectangle {
-                            x: object.pos.x as f32,
-                            y: object.pos.y as f32,
+                            x: object.pos.x as f32 - 2.5,
+                            y: object.pos.y as f32 - 2.5,
                             width: 5.0,
                             height: 5.0,
                         },
@@ -33,8 +33,8 @@ impl Species {
                 BehaviourArchetypes::Hunter => {
                     d.draw_rectangle_pro(
                         Rectangle {
-                            x: object.pos.x as f32,
-                            y: object.pos.y as f32,
+                            x: object.pos.x as f32 - 2.5,
+                            y: object.pos.y as f32 - 2.5,
                             width: 5.0,
                             height: 5.0,
                         },
@@ -59,9 +59,11 @@ impl Species {
                 b.add_vision(a);
             }
         }
-        for organism in &mut self.organisms {
+        self.organisms.retain_mut(|organism| {
             organism.vision();
-        }
+            organism.consume_energy(ft);
+            organism.energy > 0.0
+        });
     }
     pub fn add(&mut self, org: Organism) {
         self.organisms.push(org);
@@ -78,11 +80,11 @@ pub struct Organism {
     idle_dir: DVec2,
     pos: DVec2,
     visible_creatures: Vec<DVec2>,
+    stomach: Vec<FoodTypes>
 }
 impl Organism {
     pub fn new(
         metabolism: f64,
-        speed: f64,
         vision: i32,
         pos: DVec2,
         behaviour_type: BehaviourArchetypes,
@@ -92,35 +94,74 @@ impl Organism {
         Self {
             energy: 100.0,
             metabolism,
-            speed,
+            speed: metabolism * 1.25,
             vision,
             pos,
             behaviour_type,
             current_behaviour: CurrentBehaviour::Idle,
             idle_dir: dvec2(rand, rand2),
             visible_creatures: vec![],
+            stomach: vec![]
         }
     }
     fn movement(&mut self, ft: f64) {
         let mut rng = rand::rng();
-        let movement: f64 = rng.random();
-
+        let metabolic_rate = self.metabolism / 10.0;
         match self.current_behaviour {
             CurrentBehaviour::Active(move_dir) => {
-                self.pos += move_dir * self.speed * movement * ft;
-            }
-            CurrentBehaviour::Idle => {
-                if rng.random_bool(0.05) {
-                    let jitter = dvec2(rng.random_range(-0.5..=0.5), rng.random_range(-0.5..=0.5));
-                    let new_dir = self.idle_dir + jitter;
-                    if new_dir.length_squared() > 0.0001 {
-                        self.idle_dir = new_dir.normalize();
+                        self.pos += move_dir * self.speed * metabolic_rate * 1.5 * ft;
                     }
-                }
+            CurrentBehaviour::Idle => {
+                        if rng.random_bool(0.05) {
+                            let jitter = dvec2(rng.random_range(-0.5..=0.5), rng.random_range(-0.5..=0.5));
+                            let new_dir = self.idle_dir + jitter;
+                            if new_dir.length_squared() > 0.0001 {
+                                self.idle_dir = new_dir.normalize();
+                            }
+                        }
 
-                self.pos += self.idle_dir * self.speed * ft * movement;
-            }
+                        self.pos += self.idle_dir * self.speed * metabolic_rate * ft;
+                    }
+            CurrentBehaviour::Gather(_dvec2) => todo!(),
+            CurrentBehaviour::Rest => todo!(),
         }
+    }
+    fn consume_energy(&mut self, ft: f64) {
+
+        self.digest_food();
+
+        let activity_multiplier = match self.current_behaviour {
+            CurrentBehaviour::Idle => 1.0,
+            CurrentBehaviour::Active(_) => 2.0,
+            CurrentBehaviour::Gather(_) => 1.5,
+            CurrentBehaviour::Rest => 0.5,
+        };
+    
+        let total_loss = self.metabolism * activity_multiplier;
+        self.energy -= total_loss * ft;
+    }
+    fn digest_food(&mut self) {
+        self.stomach.retain_mut(|food| {
+            match food {
+                FoodTypes::Plant(energy_left) => {
+                    self.energy += self.metabolism;
+                    *energy_left -= self.metabolism;
+                    if *energy_left <= 0.0 {
+                        self.energy += *energy_left;
+
+                    }
+                    *energy_left > 0.0
+                },
+                FoodTypes::Meat(energy_left) => {
+                    self.energy += self.metabolism;
+                    *energy_left -= self.metabolism;
+                    if *energy_left <= 0.0 {
+                        self.energy += *energy_left;
+                    }
+                    *energy_left > 0.0
+                },
+            }
+        });
     }
     fn clear_vision(&mut self) {
         self.visible_creatures.clear();
@@ -185,5 +226,12 @@ pub enum BehaviourArchetypes {
 #[derive(Debug, PartialEq, Clone)]
 pub enum CurrentBehaviour {
     Active(DVec2),
+    Gather(DVec2),
     Idle,
+    Rest,
+}
+#[derive(Debug, PartialEq, Clone)]
+pub enum FoodTypes {
+    Plant(f64),
+    Meat(f64),
 }
