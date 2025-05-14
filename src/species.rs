@@ -15,6 +15,18 @@ impl Species {
     pub fn new() -> Species {
         Species { organisms: vec![] }
     }
+
+    pub fn update(&mut self, ft: f64, food_field: &mut FoodField) {
+        self.update_movement_and_clear_vision(ft);
+        self.update_vision();
+        self.update_behaviour(food_field);
+        self.cleanup_dead(ft);
+    }
+
+    pub fn add(&mut self, org: Organism) {
+        self.organisms.push(org);
+    }
+
     pub fn draw(&self, d: &mut RaylibDrawHandle) {
         for object in self.organisms.iter() {
             match object.behaviour_type {
@@ -54,14 +66,16 @@ impl Species {
             );
         }
     }
-    pub fn update(&mut self, ft: f64, food_field: &mut FoodField) {
-        let n = self.organisms.len();
 
+    fn update_movement_and_clear_vision(&mut self, ft: f64) {
         for organism in &mut self.organisms {
             organism.movement(ft);
             organism.clear_vision();
         }
+    }
 
+    fn update_vision(&mut self) {
+        let n = self.organisms.len();
         for i in 0..n {
             for j in 0..i {
                 let [a, b] = self.organisms.get_disjoint_mut([i, j]).unwrap();
@@ -69,24 +83,24 @@ impl Species {
                 b.add_vision(a);
             }
         }
+    }
 
+    fn update_behaviour(&mut self, food_field: &mut FoodField) {
         for organism in &mut self.organisms {
             organism.add_visible_food(&food_field.items);
             organism.try_gather_food(food_field);
         }
+    }
 
+    fn cleanup_dead(&mut self, ft: f64) {
         self.organisms.retain_mut(|organism| {
             organism.vision();
-            organism.consume_energy(ft);
+            organism.energy_consumption(ft);
             if !organism.stomach.is_empty() {
                 println!("{:?}, {}", organism.stomach, organism.energy);
             }
             organism.energy > 0.0
         });
-    }
-
-    pub fn add(&mut self, org: Organism) {
-        self.organisms.push(org);
     }
 }
 #[derive(Debug, PartialEq, Clone)]
@@ -147,23 +161,8 @@ impl Organism {
             } //            CurrentBehaviour::Rest => todo!(),
         }
     }
-    pub fn try_gather_food(&mut self, food_field: &mut FoodField) {
-        let mut remaining_food = Vec::new();
 
-        for food in food_field.items.drain(..) {
-            let dist = self.pos.distance(food.pos);
-            if dist <= 1.0 {
-                println!("Gathering food: {:?}", food.kind);
-                self.stomach.push(food.kind);
-            } else {
-                remaining_food.push(food);
-            }
-        }
-
-        food_field.items = remaining_food;
-    }
-
-    fn consume_energy(&mut self, ft: f64) {
+    fn energy_consumption(&mut self, ft: f64) {
         self.digest_food(ft);
 
         let activity_multiplier = match self.current_behaviour {
@@ -176,6 +175,19 @@ impl Organism {
         let total_loss = self.metabolism * activity_multiplier;
         self.energy -= total_loss * ft;
     }
+
+    fn try_gather_food(&mut self, food_field: &mut FoodField) {
+        food_field.items.retain(|food| {
+            if self.pos.distance(food.pos) <= 1.0 {
+                println!("Gathering food: {:?}", food.kind);
+                self.stomach.push(food.kind.clone());
+                false
+            } else {
+                true
+            }
+        });
+    }
+
     fn digest_food(&mut self, ft: f64) {
         self.stomach.retain_mut(|food| {
             let energy_left = match food {
@@ -186,7 +198,7 @@ impl Organism {
             if *energy_left <= 0.0 {
                 return false;
             }
-            let digest_amount = (self.metabolism * (6.5/15.0) * ft).min(*energy_left);
+            let digest_amount = (self.metabolism * (6.5 / 15.0) * ft).min(*energy_left);
             *energy_left -= digest_amount;
             self.energy += digest_amount;
 
@@ -194,9 +206,87 @@ impl Organism {
         });
     }
 
-    fn clear_vision(&mut self) {
-        self.visible_creatures.clear();
+    fn vision(&mut self) {
+        match self.behaviour_type {
+            BehaviourArchetypes::Prey => {
+                self.prey_vision();
+            }
+            BehaviourArchetypes::Hunter => {
+                self.hunter_vision();
+            }
+        }
     }
+
+    fn prey_vision(&mut self) {
+        let mut flee_dir = DVec2::ZERO;
+        let mut closest_plant: Option<DVec2> = None;
+        let mut min_plant_dist = f64::MAX;
+
+        for entity in &self.visible_creatures {
+            match entity {
+                PerceivedEntity::Organism { pos, kind } if *kind == BehaviourArchetypes::Hunter => {
+                    flee_dir += self.pos - *pos;
+                }
+                PerceivedEntity::Food { pos, food_type } => {
+                    if let FoodTypes::Plant(_) = food_type {
+                        let dist = self.pos.distance(*pos);
+                        if dist < min_plant_dist {
+                            min_plant_dist = dist;
+                            closest_plant = Some(*pos);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if flee_dir.length_squared() > 0.0001 {
+            self.current_behaviour = CurrentBehaviour::Active(flee_dir.normalize());
+        } else if let Some(target) = closest_plant {
+            self.current_behaviour = CurrentBehaviour::Gather((target - self.pos).normalize());
+        } else {
+            self.current_behaviour = CurrentBehaviour::Idle;
+        }
+    }
+    fn hunter_vision(&mut self) {
+        let mut closest_prey: Option<DVec2> = None;
+        let mut min_prey_dist = f64::MAX;
+        let mut closest_meat: Option<DVec2> = None;
+        let mut min_meat_dist = f64::MAX;
+
+        for entity in &self.visible_creatures {
+            match entity {
+                PerceivedEntity::Organism { pos, kind } if *kind == BehaviourArchetypes::Prey => {
+                    let dist = self.pos.distance(*pos);
+                    if dist < min_prey_dist {
+                        min_prey_dist = dist;
+                        closest_prey = Some(*pos);
+                    }
+                }
+                PerceivedEntity::Food { pos, food_type } => {
+                    if let FoodTypes::Meat(_) = food_type {
+                        let dist = self.pos.distance(*pos);
+                        if dist < min_meat_dist {
+                            min_meat_dist = dist;
+                            closest_meat = Some(*pos);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if let Some(prey_pos) = closest_prey {
+            let dir = (prey_pos - self.pos).normalize();
+            self.current_behaviour = CurrentBehaviour::Active(dir);
+        } else if let Some(meat_pos) = closest_meat {
+            let dir = (meat_pos - self.pos).normalize();
+            self.current_behaviour = CurrentBehaviour::Gather(dir);
+        } else {
+            self.current_behaviour = CurrentBehaviour::Idle;
+        }
+    }
+
     fn add_vision(&mut self, other: &Organism) {
         if self.pos.distance(other.pos) <= self.vision as f64 {
             self.visible_creatures.push(PerceivedEntity::Organism {
@@ -206,7 +296,7 @@ impl Organism {
         }
     }
 
-    pub fn add_visible_food(&mut self, food_list: &[Food]) {
+    fn add_visible_food(&mut self, food_list: &[Food]) {
         for food in food_list {
             if self.pos.distance(food.pos) <= self.vision as f64 {
                 self.visible_creatures.push(PerceivedEntity::Food {
@@ -216,85 +306,8 @@ impl Organism {
             }
         }
     }
-
-    fn vision(&mut self) {
-        match self.behaviour_type {
-            BehaviourArchetypes::Prey => {
-                let mut flee_dir = DVec2::ZERO;
-                let mut closest_plant: Option<DVec2> = None;
-                let mut min_plant_dist = f64::MAX;
-
-                for entity in &self.visible_creatures {
-                    match entity {
-                        PerceivedEntity::Organism { pos, kind }
-                            if *kind == BehaviourArchetypes::Hunter =>
-                        {
-                            flee_dir += self.pos - *pos;
-                        }
-                        PerceivedEntity::Food { pos, food_type } => {
-                            if let FoodTypes::Plant(_) = food_type {
-                                let dist = self.pos.distance(*pos);
-                                if dist < min_plant_dist {
-                                    min_plant_dist = dist;
-                                    closest_plant = Some(*pos);
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-
-                if flee_dir.length_squared() > 0.0001 {
-                    self.current_behaviour = CurrentBehaviour::Active(flee_dir.normalize());
-                } else if let Some(target) = closest_plant {
-                    self.current_behaviour =
-                        CurrentBehaviour::Gather((target - self.pos).normalize());
-                } else {
-                    self.current_behaviour = CurrentBehaviour::Idle;
-                }
-            }
-
-            BehaviourArchetypes::Hunter => {
-                let mut closest_prey: Option<DVec2> = None;
-                let mut min_prey_dist = f64::MAX;
-                let mut closest_meat: Option<DVec2> = None;
-                let mut min_meat_dist = f64::MAX;
-
-                for entity in &self.visible_creatures {
-                    match entity {
-                        PerceivedEntity::Organism { pos, kind }
-                            if *kind == BehaviourArchetypes::Prey =>
-                        {
-                            let dist = self.pos.distance(*pos);
-                            if dist < min_prey_dist {
-                                min_prey_dist = dist;
-                                closest_prey = Some(*pos);
-                            }
-                        }
-                        PerceivedEntity::Food { pos, food_type } => {
-                            if let FoodTypes::Meat(_) = food_type {
-                                let dist = self.pos.distance(*pos);
-                                if dist < min_meat_dist {
-                                    min_meat_dist = dist;
-                                    closest_meat = Some(*pos);
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-
-                if let Some(prey_pos) = closest_prey {
-                    let dir = (prey_pos - self.pos).normalize();
-                    self.current_behaviour = CurrentBehaviour::Active(dir);
-                } else if let Some(meat_pos) = closest_meat {
-                    let dir = (meat_pos - self.pos).normalize();
-                    self.current_behaviour = CurrentBehaviour::Gather(dir);
-                } else {
-                    self.current_behaviour = CurrentBehaviour::Idle;
-                }
-            }
-        }
+    fn clear_vision(&mut self) {
+        self.visible_creatures.clear();
     }
 }
 #[derive(Debug, PartialEq, Clone)]

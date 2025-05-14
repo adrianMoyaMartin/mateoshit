@@ -20,7 +20,8 @@ fn main() {
         pos: dvec2(120.0, 310.0),
         kind: species::FoodTypes::Plant(100.0),
     };
-    let org = Organism::new(20.0, 150, dvec2(640.0, 440.0), BehaviourArchetypes::Hunter);
+    
+    let org = Organism::new(-20.0, 150, dvec2(640.0, 440.0), BehaviourArchetypes::Hunter);
     let org2 = Organism::new(10.0, 200, dvec2(100.0, 300.0), BehaviourArchetypes::Prey);
     let org3 = Organism::new(10.0, 200, dvec2(600.0, 300.0), BehaviourArchetypes::Prey);
 
